@@ -47,13 +47,13 @@ def get_tonal_function(baseline_harmony, harmony_root):
     interval_from_main_key = Interval(Note(baseline_harmony), Note(harmony_root)).directedName
 
     if interval_from_main_key[-1] == '1' or interval_from_main_key[-1] == '3' or interval_from_main_key[-1] == '6':
-        return 'TONIC'
+        return 'TONIC', 1
 
     if interval_from_main_key == 'P-5' or interval_from_main_key[-1] == 'P4' or \
             interval_from_main_key[-2:] == '-7' or interval_from_main_key[-2:].upper() == 'M2':
-        return 'SUBDOMINANT'
+        return 'SUBDOMINANT', 4
 
-    return 'DOMINANT'
+    return 'DOMINANT', 5
 
 
 def get_degree(base: music21.note.Note, note: music21.note.Note):
@@ -61,7 +61,7 @@ def get_degree(base: music21.note.Note, note: music21.note.Note):
     down = interval[-2] == '-'
     degree = int(interval[-1])
     if down:
-        degree = (9 - degree) % 8
+        degree = (8 - degree) % 7 + 1
 
     return degree
 
@@ -109,7 +109,7 @@ class ChoraleVector:
         self.number_of_phrases = len(self.fermata_global_offsets)
 
         # Make the phrase representation vector
-        self.phrase_representation_vector = []
+        self.phrase_object_vector = []
         for i, offset in enumerate(self.fermata_global_offsets):
             if i == 0:
                 # This is the first phrase and starts in the beginning
@@ -120,10 +120,14 @@ class ChoraleVector:
 
             end_offset = offset
 
-            self.phrase_representation_vector.append(PhraseObject(self, start_offset, end_offset, i))
+            self.phrase_object_vector.append(PhraseObject(self, start_offset, end_offset, i))
 
 
 class PhraseObject:
+    """
+    The object representing each phrase in the chorale. This object will consist of key features of the phrase, such as
+    the edge harmonies of the phrase.
+    """
     def __init__(
             self,
             my_chorale_vector: ChoraleVector,
@@ -159,10 +163,10 @@ class PhraseObject:
         self.length = end_offset - start_offset
 
         for harmony in self.opening_harmony_group.harmony_list:
-            harmony.set_relation_to_phrase_key()
+            harmony.set_relation_to_local_key()
 
         for harmony in self.closing_harmony_group.harmony_list:
-            harmony.set_relation_to_phrase_key()
+            harmony.set_relation_to_local_key()
 
     def get_harmony_group(self, offset, opening: bool):
         # This method will return a HarmonyGroup object
@@ -191,15 +195,19 @@ class PhraseObject:
         # DOMINANT: V, VII
         # We shall return a pair of tonal functions representing the local tonality of the opening harmony group and
         # the closing harmony group
-        return (get_tonal_function(self.my_chorale_vector.key, self.opening_harmony_group.local_tonality),
-                get_tonal_function(self.my_chorale_vector.key, self.closing_harmony_group.local_tonality))
+        return (self.opening_harmony_group.local_tonality,
+                self.closing_harmony_group.local_tonality)
 
 
 class HarmonyGroup:
-    def __init__(self, chord_iterator, my_phrase=None, opening=True):
+    def __init__(self, chord_iterator, my_phrase, opening=True):
         self.it = chord_iterator
 
-        self.harmony_list = [MyHarmony(my_chord, my_phrase, opening) for my_chord in chord_iterator]
+        self.my_phrase = my_phrase
+
+        self.chorale_key = my_phrase.my_chorale_vector.key
+
+        self.harmony_list = [MyHarmony(my_chord, self) for my_chord in chord_iterator]
 
         self.opening = opening
 
@@ -208,6 +216,8 @@ class HarmonyGroup:
 
         self.cadence_type = None if opening else self.get_cadence_type()
 
+        # The local tonality will be represented by a tuple consisting of the tonal functionality of the harmony in
+        # relation to the main key, and the degree of the main harmony in relation to the main chorale key.
         self.local_tonality = self.get_local_tonality()
 
     def get_cadence_type(self):
@@ -274,62 +284,56 @@ class HarmonyGroup:
 
     def get_local_tonality(self):
         """
-        :return: Name of the root note of the tonality
+        :return: Tuple of the name of the harmonic function of the local tonality, and the degree of the local
+        harmony in relation to the chorale key
         """
         if self.opening:
             # This is the opening harmonies and we will determine the tonality according to the harmony on the downbeat
-            return self.harmony_list[-1].chord.root().name
+            harmony_root = self.harmony_list[-1].chord.root().name
 
         else:
             # The tonality in the closing group will be dependent on the type of cadence
             assert self.cadence_type is not None
 
-            if self.cadence_type == 'AUTHENTIC' or self.cadence_type == 'PERFECT':
-                return self.harmony_list[-1].chord.root().name
+            if self.cadence_type == 'AUTHENTIC' or self.cadence_type == 'PERFECT' or self.cadence_type == 'PLAGAL':
+                harmony_root = self.harmony_list[-1].chord.root().name
 
-            if self.cadence_type == 'HALF':
-                return self.harmony_list[-1].chord.root().transpose(Interval('P4')).name
+            else:
+                # self.cadence_type == 'HALF':
+                harmony_root = self.harmony_list[-1].chord.root().transpose(Interval('P4')).name
+
+        return get_tonal_function(self.chorale_key, harmony_root)
 
 
 class MyHarmony:
-    def __init__(self, chord, my_phrase: PhraseObject = None, opening_group=True):
+    def __init__(self, chord, my_harmony_group: HarmonyGroup):
         self.chord = chord
-        self.my_phrase = my_phrase
+        self.my_harmony_group = my_harmony_group
         self.metric_weight = None
-        self.opening_group = opening_group
 
         self.root = Note(self.chord.root())
 
-        # This attribute should be less relevant, but we'll have it anyway, just in case
         self.relation_to_chorale_key = self.get_relation_to_chorale_key()
 
         # The phrase key is determined by the harmonies, meaning after this object is created. This should be
         # filled at a later time after the generation of the chorale representation.
-        # This will be a tuple of the harmonic function and degree of the harmony in the context of the local tonality
-        self.relation_to_phrase_key = None
+        self.relation_to_local_key = None
 
         self.soprano_degree = self.get_soprano_degree()
         self.inversion = chord.inversion()
 
     def get_relation_to_chorale_key(self):
         # For now this will return the degree of the harmony in the context of the main key
-        if self.my_phrase is None:
-            return None
-
-        main_key = Note(self.my_phrase.my_chorale_vector.key)
+        main_key = Note(self.my_harmony_group.my_phrase.my_chorale_vector.key)
         return get_degree(main_key, self.root)
 
-    def set_relation_to_phrase_key(self):
-        if self.my_phrase is None:
-            return
+    def set_relation_to_local_key(self):
+        # Local key degree is the local tonality in relation to the chorale key
+        local_key_degree = self.my_harmony_group.local_tonality[1]
 
-        phrase_key = self.my_phrase.opening_harmony_group.local_tonality if self.opening_group \
-            else self.my_phrase.closing_harmony_group.local_tonality
+        degree = (self.relation_to_chorale_key - local_key_degree) % 7 + 1
 
-        harmonic_function = get_tonal_function(baseline_harmony=phrase_key, harmony_root=self.root.name)
-        degree = get_degree(Note(phrase_key), self.root)
-
-        self.relation_to_phrase_key = degree, harmonic_function
+        self.relation_to_local_key = degree
 
     def set_metric_weight(self):
         raise NotImplementedError

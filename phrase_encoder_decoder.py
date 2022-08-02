@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from ChoralePhraseTensor import GeneratedPhraseTensor, PhraseTensor
+from ChoralePhraseTensor import GeneratedPhraseTensor, PhraseTensor, cut_tensor_by_features
 
 
 class PhraseEncoder(nn.Module):
@@ -50,6 +50,21 @@ class PhraseDecoder(nn.Module):
         return self.decoder(x)
 
 
+class PhraseDecoderWithSoftmax(nn.Module):
+    def __init__(self, in_dim, out_dim, number_of_hidden_layers=2):
+        super().__init__()
+
+        self.decoder = PhraseDecoder(in_dim, out_dim, number_of_hidden_layers)
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, x):
+        feature_scores = cut_tensor_by_features(self.decoder(x))
+        softmax_scores = []
+        for feature in feature_scores:
+            softmax_scores.append(self.softmax(feature))
+        return torch.concat([*softmax_scores], dim=1)
+
+
 # This is copied from an exercise from Technion class 236781
 class VAE(nn.Module):
     def __init__(self, features_encoder, features_decoder, in_size, z_dim):
@@ -97,7 +112,6 @@ class VAE(nn.Module):
     def sample(self, n):
         with torch.no_grad():
             z = torch.randn((n, self.z_dim)).to(next(self.log_sigma2.parameters()).device)
-            z = self.z_to_h(z).unsqueeze(2).unsqueeze(3)
             samples = self.features_decoder(z)
 
         samples = [s.detach().cpu() for s in samples]
@@ -122,7 +136,7 @@ def vae_loss(x, xr, z_mu, z_log_sigma2, x_sigma2):
         - The KL divergence loss term
     all three are scalars, averaged over the batch dimension.
     """
-    reg = 1 / (x_sigma2 * x.shape[1] * x.shape[2] * x.shape[3])
+    reg = 1 / (x_sigma2 * x.shape[1])
     data_loss = reg * torch.norm((x - xr).reshape((x.shape[0], -1)), dim=1) ** 2.0
     kldiv_loss = (
         torch.sum(torch.exp(z_log_sigma2), dim=1) +

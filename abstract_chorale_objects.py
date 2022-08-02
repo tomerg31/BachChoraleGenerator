@@ -85,7 +85,15 @@ class ChoraleVector:
     def __init__(self, chorale: music21.stream.base.Score):
         self.chorale = chorale
 
+        self.chorale_name = chorale.metadata.movementName
+
         self.chorale_chords = chorale.chordify()
+
+        # Most of chorales in dataset have the mode indicated. if not, we'll set the default to major.
+        if 'mode' in dir(chorale.flat.keySignature):
+            self.mode = chorale.flat.keySignature.mode
+        else:
+            self.mode = "major"
 
         # Since we are in Bach's music, a reliable assumption is that the last note of the bass voice would also
         # the key of the chorale

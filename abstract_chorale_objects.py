@@ -44,16 +44,27 @@ def get_tonal_function(baseline_harmony, harmony_root):
     :param harmony_root: String representing a note
     :return: TONIC, SUBDOMINANT or DOMINANT
     """
+    # Get the directed name string of the interval between the base key and the harmony root
     interval_from_main_key = Interval(Note(baseline_harmony), Note(harmony_root)).directedName
 
-    if interval_from_main_key[-1] == '1' or interval_from_main_key[-1] == '3' or interval_from_main_key[-1] == '6':
-        return 'TONIC', 1
+    # Extract the numerical value of the interval
+    degree = int(interval_from_main_key[-1])
 
-    if interval_from_main_key == 'P-5' or interval_from_main_key[-1] == 'P4' or \
-            interval_from_main_key[-2:] == '-7' or interval_from_main_key[-2:].upper() == 'M2':
-        return 'SUBDOMINANT', 4
+    # We want to count the base key as the lower note of the interval, so in case it did not calculate it this way,
+    # fix it
+    if interval_from_main_key[-2] == '-':
+        degree = 9 - degree
 
-    return 'DOMINANT', 5
+    if degree in [1, 3, 6]:
+        tonal_function = 'TONIC'
+
+    elif degree in [2, 4]:
+        tonal_function = 'SUBDOMINANT'
+
+    else:  # degree in [5, 7]
+        tonal_function = 'DOMINANT'
+
+    return tonal_function, degree
 
 
 def get_degree(base: music21.note.Note, note: music21.note.Note):

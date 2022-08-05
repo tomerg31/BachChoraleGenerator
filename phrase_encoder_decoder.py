@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from ChoralePhraseTensor import GeneratedPhraseTensor, PhraseTensor, cut_tensor_by_features
+from ChoralePhraseTensor import GeneratedPhraseBatchTensor, PhraseTensor, cut_tensor_by_features
 
 
 class PhraseEncoder(nn.Module):

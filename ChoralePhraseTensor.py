@@ -1,7 +1,5 @@
 import torch
 from abstract_chorale_objects import PhraseObject
-from music21.note import Note
-from music21.interval import Interval
 
 MAX_CHORALE_LENGTH = 10
 MAX_PHRASE_LENGTH_IN_QUARTERS = 24
@@ -56,6 +54,50 @@ INT_TO_MODE = {
 # 0 will be the root inversion, 1 - first inversion, 2 - second inversion, and 3 - "other"
 NUMBER_OF_INVERSIONS = 4
 
+FEATURES_ONE_HOT_LENGTH = {
+    'index_in_chorale': 10,
+    'phrase_mode': 2,
+    'length_in_quarters': 24,
+    'opening_tonal_function': 3,
+    'opening_tonality': 7,
+    'closing_tonal_function': 3,
+    'closing_tonality': 7,
+    'opening_pickup_harmony': 7,
+    'opening_pickup_harmony_soprano': 7,
+    'opening_pickup_harmony_inversion': 4,
+    'opening_downbeat_harmony': 7,
+    'opening_downbeat_harmony_soprano': 7,
+    'opening_downbeat_harmony_inversion': 4,
+    'pre_fermata_harmony': 7,
+    'pre_fermata_harmony_soprano': 7,
+    'pre_fermata_harmony_inversion': 4,
+    'fermata_harmony': 7,
+    'fermata_harmony_soprano': 7,
+    'fermata_harmony_inversion': 4
+}
+
+# This is the list of features that the phrase vector that is the input and the output of the VAE will have.
+# If you wish to add another feature, make sure it is supported in all the structures in this file.
+PHRASE_FEATURE_LIST = [
+    'length_in_quarters',
+    'opening_tonal_function',
+    'opening_tonality',
+    'closing_tonal_function',
+    'closing_tonality',
+    'opening_pickup_harmony',
+    'opening_pickup_harmony_soprano',
+    'opening_pickup_harmony_inversion',
+    'opening_downbeat_harmony',
+    'opening_downbeat_harmony_soprano',
+    'opening_downbeat_harmony_inversion',
+    'pre_fermata_harmony',
+    'pre_fermata_harmony_soprano',
+    'pre_fermata_harmony_inversion',
+    'fermata_harmony',
+    'fermata_harmony_soprano',
+    'fermata_harmony_inversion'
+]
+
 
 def degree_to_one_hot(degree):
     one_hot_degree = torch.zeros(SCALE_DEGREES)
@@ -63,14 +105,8 @@ def degree_to_one_hot(degree):
     return one_hot_degree
 
 
-def scores_to_one_hot(scores: torch.Tensor):
-    one_hot = torch.zeros_like(scores)
-    one_hot[torch.argmax(scores)] = 1
-    return one_hot
-
-
-def one_hot_to_index(one_hot):
-    return int(torch.argmax(one_hot))
+def scores_to_index(scores: torch.Tensor):
+    return torch.argmax(scores, dim=-1)
 
 
 def degree_from_series_of_relative_degrees(series):
@@ -91,25 +127,7 @@ def inversion_to_one_hot(inversion):
 
 def cut_tensor_by_features(tensor):
     cut_off_indices = torch.tensor(
-        [
-            # MAX_CHORALE_LENGTH,
-            NUMBER_OF_MODES,
-            MAX_PHRASE_LENGTH_IN_QUARTERS,  # length_in_quarters
-            len(TONAL_FUNCTIONS_TO_INDEX),  # opening_tonality
-            len(TONAL_FUNCTIONS_TO_INDEX),  # closing_tonality
-            SCALE_DEGREES,  # opening_pickup_harmony
-            SCALE_DEGREES,  # opening_pickup_harmony_soprano
-            NUMBER_OF_INVERSIONS,  # opening_pickup_harmony_inversion
-            SCALE_DEGREES,  # opening_downbeat_harmony
-            SCALE_DEGREES,  # opening_downbeat_harmony_soprano
-            NUMBER_OF_INVERSIONS,  # opening_downbeat_harmony_inversion
-            SCALE_DEGREES,  # pre_fermata_harmony
-            SCALE_DEGREES,  # pre_fermata_harmony_soprano
-            NUMBER_OF_INVERSIONS,  # pre_fermata_harmony_inversion
-            SCALE_DEGREES,  # fermata_harmony
-            SCALE_DEGREES  # fermata_harmony_soprano
-            # fermata_harmony_inversion
-        ]
+        [FEATURES_ONE_HOT_LENGTH[feature] for feature in PHRASE_FEATURE_LIST][:-1]
     )
     cut_off_indices = torch.cumsum(cut_off_indices, dim=0)
 
@@ -152,11 +170,21 @@ class PhraseTensor:
         # The opening and closing local tonalities. Since we are working in relative tonalities, we will not care
         # about the absolute pitch of the root. We want the harmonic function in relation to the key of the chorale
         # - meaning either TONIC, DOMINANT, or SUBDOMINANT as a classifier of the local tonality.
-        self.opening_tonality = torch.zeros(len(TONAL_FUNCTIONS_TO_INDEX))
-        self.opening_tonality[TONAL_FUNCTIONS_TO_INDEX[self.phrase_object.phrase_tonal_progression[OPENING][0]]] = 1
+        self.opening_tonal_function = torch.zeros(len(TONAL_FUNCTIONS_TO_INDEX))
+        self.opening_tonal_function[
+            TONAL_FUNCTIONS_TO_INDEX[self.phrase_object.phrase_tonal_progression[OPENING][0]]
+        ] = 1
 
-        self.closing_tonality = torch.zeros(len(TONAL_FUNCTIONS_TO_INDEX))
-        self.closing_tonality[TONAL_FUNCTIONS_TO_INDEX[self.phrase_object.phrase_tonal_progression[CLOSING][0]]] = 1
+        self.closing_tonal_function = torch.zeros(len(TONAL_FUNCTIONS_TO_INDEX))
+        self.closing_tonal_function[
+            TONAL_FUNCTIONS_TO_INDEX[self.phrase_object.phrase_tonal_progression[CLOSING][0]]
+        ] = 1
+
+        self.opening_tonality = torch.zeros(SCALE_DEGREES)
+        self.opening_tonality[self.phrase_object.phrase_tonal_progression[OPENING][1] - 1] = 1
+
+        self.closing_tonality = torch.zeros(SCALE_DEGREES)
+        self.closing_tonality[self.phrase_object.phrase_tonal_progression[CLOSING][1] - 1] = 1
 
         # We want four core harmonies for each phrase - pickup (if exists), opening downbeat, pre-fermata harmony,
         # and fermata harmony. In addition, we will have the soprano degree. Note that the harmony is represented by
@@ -184,7 +212,7 @@ class PhraseTensor:
             self.phrase_object.opening_harmony_group.harmony_list[-1].soprano_degree
         )
 
-        self.opening_downbeat__harmony_inversion = inversion_to_one_hot(
+        self.opening_downbeat_harmony_inversion = inversion_to_one_hot(
             self.phrase_object.opening_harmony_group.harmony_list[-1].inversion
         )
 
@@ -215,265 +243,223 @@ class PhraseTensor:
         )
 
     def __call__(self):
-        return torch.concat(
-            [
-                # self.index_in_chorale,
-                self.phrase_mode,
-                self.length_in_quarters,
-                self.opening_tonality,
-                self.closing_tonality,
-                self.opening_pickup_harmony,
-                self.opening_pickup_harmony_soprano,
-                self.opening_pickup_harmony_inversion,
-                self.opening_downbeat_harmony,
-                self.opening_downbeat_harmony_soprano,
-                self.opening_downbeat__harmony_inversion,
-                self.pre_fermata_harmony,
-                self.pre_fermata_harmony_soprano,
-                self.pre_fermata_harmony_inversion,
-                self.fermata_harmony,
-                self.fermata_harmony_soprano,
-                self.fermata_harmony_inversion
-            ]
-        )
+        features = []
+        for feature in PHRASE_FEATURE_LIST:
+            exec(f"features += [self.{feature}]")
+
+        return torch.concat(features)
 
 
-class GeneratedPhraseTensor:
-    def __init__(self, generator_output):
+class GeneratedPhraseBatchTensor:
+    def __init__(self, generator_output: torch.Tensor):
         self.generator_output = generator_output
+        self.batch_size = self.generator_output.size()[0]
+        self.phrase_vector_length = self.generator_output.size()[-1]
 
-        # generator_output is a 1d tensor which is exactly the shape of a PhraseTensor that came out of a real chorale.
+        # We want to support both a single phrase and a batch of phrases, so make sure that if the input is a
+        # single phrase, we treat it as a batch of size one.
+        if len(self.generator_output.size()) == 1:
+            self.generator_output = torch.unsqueeze(self.generator_output, dim=0)
+            self.batch_size = 1
+
         # The strategy to translate it back to the features that represent a chorale phrase, is to separate the long
         # tensor to its parts, and recreate a one hot encoding as in the PhraseTensor object, according to entry with
         # the highest score in each part
 
-        (
-            # index_in_chorale_score,
-            mode_score,
-            length_in_quarters_score,
-            opening_tonality_score,
-            closing_tonality_score,
-            opening_pickup_harmony_score,
-            opening_pickup_harmony_soprano_score,
-            opening_pickup_harmony_inversion_score,
-            opening_downbeat_harmony_score,
-            opening_downbeat_harmony_soprano_score,
-            opening_downbeat_harmony_inversion_score,
-            pre_fermata_harmony_score,
-            pre_fermata_harmony_soprano_score,
-            pre_fermata_harmony_inversion_score,
-            fermata_harmony_score,
-            fermata_harmony_soprano_score,
-            fermata_harmony_inversion_score
-        ) = cut_tensor_by_features(self.generator_output)
+        # This list is ordered like PHRASE_FEATURE_LIST at the top of this file
+        self.phrase_feature_list = cut_tensor_by_features(self.generator_output)
 
-        # self.score_features = [
-        #     mode_score,
-        #     length_in_quarters_score,
-        #     opening_tonality_score,
-        #     closing_tonality_score,
-        #     opening_pickup_harmony_score,
-        #     opening_pickup_harmony_soprano_score,
-        #     opening_pickup_harmony_inversion_score,
-        #     opening_downbeat_harmony_score,
-        #     opening_downbeat_harmony_soprano_score,
-        #     opening_downbeat_harmony_inversion_score,
-        #     pre_fermata_harmony_score,
-        #     pre_fermata_harmony_soprano_score,
-        #     pre_fermata_harmony_inversion_score,
-        #     fermata_harmony_score,
-        #     fermata_harmony_soprano_score,
-        #     fermata_harmony_inversion_score
-        # ]
-        #
-        # self.soft_max_features_by_score = {}
-        # softmax = torch.nn.Softmax()
-        # for feature in self.score_features:
-        #     self.soft_max_features_by_score[feature] = softmax(feature)
-        #
-        # self.soft_maxed_vector = torch.concat(list(self.soft_max_features_by_score.values()))
+        # Initialize all the potential features of the phrase
+        self.index_in_chorale = None
+        self.mode = None
+        self.length_in_quarters = None
+        self.opening_tonal_function = None
+        self.opening_tonality = None
+        self.closing_tonal_function = None
+        self.closing_tonality = None
+        self.opening_pickup_harmony = None
+        self.opening_pickup_harmony_soprano = None
+        self.opening_pickup_harmony_inversion = None
+        self.opening_downbeat_harmony = None
+        self.opening_downbeat_harmony_soprano = None
+        self.opening_downbeat_harmony_inversion = None
+        self.pre_fermata_harmony = None
+        self.pre_fermata_harmony_soprano = None
+        self.pre_fermata_harmony_inversion = None
+        self.fermata_harmony = None
+        self.fermata_harmony_soprano = None
+        self.fermata_harmony_inversion = None
 
-        # self.index_in_chorale_one_hot = scores_to_one_hot(index_in_chorale_score)
-        self.mode_one_hot = scores_to_one_hot(
-            mode_score
-        )
-        self.length_in_quarters_one_hot = scores_to_one_hot(
-            length_in_quarters_score
-        )
-        self.opening_tonality_one_hot = scores_to_one_hot(
-            opening_tonality_score
-        )
-        self.closing_tonality_one_hot = scores_to_one_hot(
-            closing_tonality_score
-        )
-        self.opening_pickup_harmony_one_hot = scores_to_one_hot(
-            opening_pickup_harmony_score
-        )
-        self.opening_pickup_harmony_soprano_one_hot = scores_to_one_hot(
-            opening_pickup_harmony_soprano_score
-        )
-        self.opening_pickup_harmony_inversion_one_hot = scores_to_one_hot(
-            opening_pickup_harmony_inversion_score
-        )
-        self.opening_downbeat_harmony_one_hot = scores_to_one_hot(
-            opening_downbeat_harmony_score
-        )
-        self.opening_downbeat_harmony_soprano_one_hot = scores_to_one_hot(
-            opening_downbeat_harmony_soprano_score
-        )
-        self.opening_downbeat_harmony_inversion_one_hot = scores_to_one_hot(
-            opening_downbeat_harmony_inversion_score
-        )
-        self.pre_fermata_harmony_one_hot = scores_to_one_hot(
-            pre_fermata_harmony_score
-        )
-        self.pre_fermata_harmony_soprano_one_hot = scores_to_one_hot(
-            pre_fermata_harmony_soprano_score
-        )
-        self.pre_fermata_harmony_inversion_one_hot = scores_to_one_hot(
-            pre_fermata_harmony_inversion_score
-        )
-        self.fermata_harmony_one_hot = scores_to_one_hot(
-            fermata_harmony_score
-        )
-        self.fermata_harmony_soprano_one_hot = scores_to_one_hot(
-            fermata_harmony_soprano_score
-        )
-        self.fermata_harmony_inversion_one_hot = scores_to_one_hot(
-            fermata_harmony_inversion_score
-        )
+        # Set the features to their actual value according to the generator output
+        for i, feature in enumerate(PHRASE_FEATURE_LIST):
+            exec(f'self.{feature} = scores_to_index(self.phrase_feature_list[i])')
 
-        # Now that we have the one hot encoding for each feature, we extract the value from each feature
+    def display_phrase_information_in_a_given_key(self, key_string=None, display_index_range=None):
+        assert (key_string in KEY_TO_INT.keys()) or (key_string is None), "Key must be an uppercase letter [A-G]"
 
-        # self.index_in_chorale = one_hot_to_index(self.index_in_chorale_one_hot)
-        self.mode = one_hot_to_index(self.mode_one_hot)
-        self.length_in_quarters = one_hot_to_index(self.length_in_quarters_one_hot) + 1
-        self.opening_tonality_degree = TONAL_FUNCTION_TO_DEGREE[
-            INDEX_TO_TONAL_FUNCTIONS[
-                one_hot_to_index(self.opening_tonality_one_hot)
-            ]
-        ]
-        self.closing_tonality_degree = TONAL_FUNCTION_TO_DEGREE[
-            INDEX_TO_TONAL_FUNCTIONS[
-                one_hot_to_index(self.closing_tonality_one_hot)
-            ]
-        ]
-        # Harmonic degrees are relative to their local tonality
-        self.opening_pickup_harmony_degree = one_hot_to_index(self.opening_pickup_harmony_one_hot)
-        self.opening_downbeat_harmony_degree = one_hot_to_index(self.opening_downbeat_harmony_one_hot)
-        self.pre_fermata_harmony_degree = one_hot_to_index(self.pre_fermata_harmony_one_hot)
-        self.fermata_harmony_degree = one_hot_to_index(self.fermata_harmony_one_hot)
+        if not display_index_range:
+            # Display all phrases in tensor
+            display_index_range = range(self.batch_size)
+        if isinstance(display_index_range, int):
+            assert display_index_range < self.batch_size, f"Only {self.batch_size} phrases in tensor!"
+            display_index_range = range(display_index_range, display_index_range + 1)
 
-        # Soprano degrees are relative to the harmony root
-        self.opening_pickup_harmony_soprano_degree = one_hot_to_index(self.opening_pickup_harmony_soprano_one_hot)
-        self.opening_downbeat_harmony_soprano_degree = one_hot_to_index(self.opening_downbeat_harmony_soprano_one_hot)
-        self.pre_fermata_harmony_soprano_degree = one_hot_to_index(self.pre_fermata_harmony_soprano_one_hot)
-        self.fermata_harmony_soprano_degree = one_hot_to_index(self.fermata_harmony_soprano_one_hot)
+        for i in display_index_range:
+            mode = ''
+            if self.mode is not None:
+                mode = INT_TO_MODE[self.mode[i]]
 
-        # Chord inversions are absolute
-        self.opening_pickup_harmony_inversion = one_hot_to_index(self.opening_pickup_harmony_inversion_one_hot)
-        self.opening_downbeat_harmony_inversion = one_hot_to_index(self.opening_downbeat_harmony_inversion_one_hot)
-        self.pre_fermata_harmony_inversion = one_hot_to_index(self.pre_fermata_harmony_inversion_one_hot)
-        self.fermata_harmony_inversion = one_hot_to_index(self.fermata_harmony_inversion_one_hot)
+            if not key_string:
+                if mode == 'MAJOR' or mode == '':
+                    key_string = 'C'
+                else:
+                    key_string = 'A'
 
-    def display_phrase_information_in_a_given_key(self, key_string=None):
-        if not key_string:
-            if INT_TO_MODE[self.mode] == 'MAJOR':
-                key_string = 'C'
-            else:
-                key_string = 'A'
-        assert key_string in KEY_TO_INT.keys(), "Key must be an uppercase letter [A-G]"
-        key = KEY_TO_INT[key_string]
-        print(f"***** Generated phrase information in the key of {key_string} {INT_TO_MODE[self.mode]} *****")
-        # print(f"Index in chorale = {self.index_in_chorale}")
-        print(f"Length in quarters = {self.length_in_quarters}")
-        print(f"Opening tonality = {DEGREE_TO_TONAL_FUNCTION[self.opening_tonality_degree]}")
-        print(f"Closing tonality = {DEGREE_TO_TONAL_FUNCTION[self.closing_tonality_degree]}")
-        print("Opening pickup harmony = {0}".format(
-            INT_TO_KEY[
-                degree_from_series_of_relative_degrees([
-                    key,
-                    self.opening_tonality_degree,
-                    self.opening_pickup_harmony_degree
-                ])
-            ]
-        ))
-        print("Opening pickup harmony soprano = {0}".format(
-            INT_TO_KEY[
-                degree_from_series_of_relative_degrees([
-                    key,
-                    self.opening_tonality_degree,
-                    self.opening_pickup_harmony_degree,
-                    self.opening_pickup_harmony_soprano_degree
-                ])
-            ]
-        ))
-        print("Opening pickup harmony inversion = {0}".format(
-            self.opening_pickup_harmony_inversion
-        ))
-        print("Opening downbeat harmony = {0}".format(
-            INT_TO_KEY[
-                degree_from_series_of_relative_degrees([
-                    key,
-                    self.opening_tonality_degree,
-                    self.opening_downbeat_harmony_degree
-                ])
-            ]
-        ))
-        print("Opening downbeat harmony soprano = {0}".format(
-            INT_TO_KEY[
-                degree_from_series_of_relative_degrees([
-                    key,
-                    self.opening_tonality_degree,
-                    self.opening_downbeat_harmony_degree,
-                    self.opening_downbeat_harmony_soprano_degree
-                ])
-            ]
-        ))
-        print("Opening downbeat harmony inversion = {0}".format(
-            self.opening_downbeat_harmony_inversion
-        ))
-        print("Pre-fermata harmony = {0}".format(
-            INT_TO_KEY[
-                degree_from_series_of_relative_degrees([
-                    key,
-                    self.closing_tonality_degree,
-                    self.pre_fermata_harmony_degree
-                ])
-            ]
-        ))
-        print("Pre-fermata harmony soprano = {0}".format(
-            INT_TO_KEY[
-                degree_from_series_of_relative_degrees([
-                    key,
-                    self.closing_tonality_degree,
-                    self.pre_fermata_harmony_degree,
-                    self.pre_fermata_harmony_soprano_degree
-                ])
-            ]
-        ))
-        print("Pre-fermata harmony inversion = {0}".format(
-            self.pre_fermata_harmony_inversion
-        ))
-        print("Fermata harmony = {0}".format(
-            INT_TO_KEY[
-                degree_from_series_of_relative_degrees([
-                    key,
-                    self.closing_tonality_degree,
-                    self.fermata_harmony_degree
-                ])
-            ]
-        ))
-        print("Fermata harmony soprano = {0}".format(
-            INT_TO_KEY[
-                degree_from_series_of_relative_degrees([
-                    key,
-                    self.closing_tonality_degree,
-                    self.fermata_harmony_degree,
-                    self.fermata_harmony_soprano_degree
-                ])
-            ]
-        ))
-        print("Fermata harmony inversion = {0}".format(
-            self.fermata_harmony_inversion
-        ))
+            key = KEY_TO_INT[key_string]
+
+            print(f"***** Generated phrase {i} information in the key of {key_string} {mode} *****")
+
+            if self.index_in_chorale is not None:
+                print(f"Index in chorale = {self.index_in_chorale[i]}")
+
+            if self.length_in_quarters is not None:
+                # Note that this is calculated according to the index, thus we need to add one to get the actual length
+                print(f"Length in quarters = {self.length_in_quarters[i] + 1}")
+
+            if self.opening_tonal_function is not None:
+                print(f"Opening tonal function = {INDEX_TO_TONAL_FUNCTIONS[self.opening_tonal_function[i].item()]}")
+
+            if self.opening_tonality is not None:
+                print("Opening tonality = {0}".format(
+                    INT_TO_KEY[
+                        degree_from_series_of_relative_degrees([
+                            key,
+                            self.opening_tonality[i].item(),
+                        ])
+                    ]
+                ))
+
+            if self.closing_tonal_function is not None:
+                print(f"Closing tonal function = {INDEX_TO_TONAL_FUNCTIONS[self.closing_tonal_function[i].item()]}")
+
+            if self.closing_tonality is not None:
+                print("Closing tonality = {0}".format(
+                    INT_TO_KEY[
+                        degree_from_series_of_relative_degrees([
+                            key,
+                            self.closing_tonality[i].item(),
+                        ])
+                    ]
+                ))
+
+            if self.opening_pickup_harmony is not None:
+                print("Opening pickup harmony = {0}".format(
+                    INT_TO_KEY[
+                        degree_from_series_of_relative_degrees([
+                            key,
+                            self.opening_tonality[i].item(),
+                            self.opening_pickup_harmony[i].item()
+                        ])
+                    ]
+                ))
+
+            if self.opening_pickup_harmony_soprano is not None:
+                print("Opening pickup harmony soprano = {0}".format(
+                    INT_TO_KEY[
+                        degree_from_series_of_relative_degrees([
+                            key,
+                            self.opening_tonality[i].item(),
+                            self.opening_pickup_harmony[i].item(),
+                            self.opening_pickup_harmony_soprano[i].item()
+                        ])
+                    ]
+                ))
+
+            if self.opening_pickup_harmony_inversion is not None:
+                print("Opening pickup harmony inversion = {0}".format(
+                    self.opening_pickup_harmony_inversion[i].item()
+                ))
+
+            if self.opening_downbeat_harmony is not None:
+                print("Opening downbeat harmony = {0}".format(
+                    INT_TO_KEY[
+                        degree_from_series_of_relative_degrees([
+                            key,
+                            self.opening_tonality[i].item(),
+                            self.opening_downbeat_harmony[i].item()
+                        ])
+                    ]
+                ))
+
+            if self.opening_downbeat_harmony_soprano is not None:
+                print("Opening downbeat harmony soprano = {0}".format(
+                    INT_TO_KEY[
+                        degree_from_series_of_relative_degrees([
+                            key,
+                            self.opening_tonality[i].item(),
+                            self.opening_downbeat_harmony[i].item(),
+                            self.opening_downbeat_harmony_soprano[i].item()
+                        ])
+                    ]
+                ))
+
+            if self.opening_downbeat_harmony_inversion is not None:
+                print("Opening downbeat harmony inversion = {0}".format(
+                    self.opening_downbeat_harmony_inversion[i].item()
+                ))
+
+            if self.pre_fermata_harmony is not None:
+                print("Pre-fermata harmony = {0}".format(
+                    INT_TO_KEY[
+                        degree_from_series_of_relative_degrees([
+                            key,
+                            self.closing_tonality[i].item(),
+                            self.pre_fermata_harmony[i].item()
+                        ])
+                    ]
+                ))
+
+            if self.pre_fermata_harmony_soprano is not None:
+                print("Pre-fermata harmony soprano = {0}".format(
+                    INT_TO_KEY[
+                        degree_from_series_of_relative_degrees([
+                            key,
+                            self.closing_tonality[i].item(),
+                            self.pre_fermata_harmony[i].item(),
+                            self.pre_fermata_harmony_soprano[i].item()
+                        ])
+                    ]
+                ))
+
+            if self.pre_fermata_harmony_inversion is not None:
+                print("Pre-fermata harmony inversion = {0}".format(
+                    self.pre_fermata_harmony_inversion[i].item()
+                ))
+
+            if self.fermata_harmony is not None:
+                print("Fermata harmony = {0}".format(
+                    INT_TO_KEY[
+                        degree_from_series_of_relative_degrees([
+                            key,
+                            self.closing_tonality[i].item(),
+                            self.fermata_harmony[i].item()
+                        ])
+                    ]
+                ))
+
+            if self.fermata_harmony_soprano is not None:
+                print("Fermata harmony soprano = {0}".format(
+                    INT_TO_KEY[
+                        degree_from_series_of_relative_degrees([
+                            key,
+                            self.closing_tonality[i].item(),
+                            self.fermata_harmony[i].item(),
+                            self.fermata_harmony_soprano[i].item()
+                        ])
+                    ]
+                ))
+
+            if self.fermata_harmony_inversion is not None:
+                print("Fermata harmony inversion = {0}".format(
+                    self.fermata_harmony_inversion[i].item()
+                ))

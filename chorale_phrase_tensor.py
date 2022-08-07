@@ -1,7 +1,8 @@
 import torch
 from abstract_chorale_objects import PhraseObject
+from chorale_feature_extractor import ExtractedPhrase
 
-MAX_CHORALE_LENGTH = 10
+MAX_CHORALE_LENGTH = 24
 MAX_PHRASE_LENGTH_IN_QUARTERS = 24
 NUMBER_OF_MODES = 2
 TONAL_FUNCTIONS_TO_INDEX = {
@@ -58,10 +59,6 @@ FEATURES_ONE_HOT_LENGTH = {
     'index_in_chorale': 10,
     'phrase_mode': 2,
     'length_in_quarters': 24,
-    'opening_tonal_function': 3,
-    'opening_tonality': 7,
-    'closing_tonal_function': 3,
-    'closing_tonality': 7,
     'opening_pickup_harmony': 7,
     'opening_pickup_harmony_soprano': 7,
     'opening_pickup_harmony_inversion': 4,
@@ -79,23 +76,21 @@ FEATURES_ONE_HOT_LENGTH = {
 # This is the list of features that the phrase vector that is the input and the output of the VAE will have.
 # If you wish to add another feature, make sure it is supported in all the structures in this file.
 PHRASE_FEATURE_LIST = [
-    'length_in_quarters',
-    'opening_tonal_function',
-    'opening_tonality',
-    'closing_tonal_function',
-    'closing_tonality',
+    # 'index_in_chorale'
+    # 'phrase_mode',
+    # 'length_in_quarters',
     'opening_pickup_harmony',
-    'opening_pickup_harmony_soprano',
-    'opening_pickup_harmony_inversion',
+    # 'opening_pickup_harmony_soprano',
+    # 'opening_pickup_harmony_inversion',
     'opening_downbeat_harmony',
-    'opening_downbeat_harmony_soprano',
-    'opening_downbeat_harmony_inversion',
+    # 'opening_downbeat_harmony_soprano',
+    # 'opening_downbeat_harmony_inversion',
     'pre_fermata_harmony',
-    'pre_fermata_harmony_soprano',
-    'pre_fermata_harmony_inversion',
+    # 'pre_fermata_harmony_soprano',
+    # 'pre_fermata_harmony_inversion',
     'fermata_harmony',
-    'fermata_harmony_soprano',
-    'fermata_harmony_inversion'
+    # 'fermata_harmony_soprano',
+    # 'fermata_harmony_inversion'
 ]
 
 
@@ -141,105 +136,89 @@ class PhraseTensor:
     representing a feature in the phrase.
     """
 
-    def __init__(self, phrase_object: PhraseObject):
+    def __init__(self, phrase_object: ExtractedPhrase):
         self.phrase_object = phrase_object
         self.valid = True
 
         # The index of the phrase in the whole chorale
-        # self.index_in_chorale = torch.zeros(MAX_CHORALE_LENGTH)
-        # self.index_in_chorale[self.phrase_object.my_index] = 1
+        self.index_in_chorale = torch.zeros(MAX_CHORALE_LENGTH)
+        self.index_in_chorale[self.phrase_object.index_in_chorale] = 1
 
         self.phrase_mode = torch.zeros(NUMBER_OF_MODES)
-        mode_index = 0 if self.phrase_object.my_chorale_vector.mode != 'minor' else 1
+        mode_index = 0 if self.phrase_object.chorale_mode != 'minor' else 1
         self.phrase_mode[mode_index] = 1
 
         # The total length of the phrase in quarters
         self.length_in_quarters = torch.zeros(MAX_PHRASE_LENGTH_IN_QUARTERS)
 
         # Too long phrases are outliers and should probably not be dealt with.
-        if self.phrase_object.length > MAX_PHRASE_LENGTH_IN_QUARTERS:
+        if self.phrase_object.phrase_length >= MAX_PHRASE_LENGTH_IN_QUARTERS:
             print(f"Phrase is longer than maximum allotted. Chorale "
-                  f"{self.phrase_object.my_chorale_vector.chorale_name} "
-                  f"phrase index {self.phrase_object.my_index}")
+                  f"{self.phrase_object.chorale_name} "
+                  f"phrase index {self.phrase_object.index_in_chorale}")
             # Mark this phrase as too long and remove it when parsing that data
             self.valid = False
             return
 
-        self.length_in_quarters[int(self.phrase_object.length)] = 1
-
-        # The opening and closing local tonalities. Since we are working in relative tonalities, we will not care
-        # about the absolute pitch of the root. We want the harmonic function in relation to the key of the chorale
-        # - meaning either TONIC, DOMINANT, or SUBDOMINANT as a classifier of the local tonality.
-        self.opening_tonal_function = torch.zeros(len(TONAL_FUNCTIONS_TO_INDEX))
-        self.opening_tonal_function[
-            TONAL_FUNCTIONS_TO_INDEX[self.phrase_object.phrase_tonal_progression[OPENING][0]]
-        ] = 1
-
-        self.closing_tonal_function = torch.zeros(len(TONAL_FUNCTIONS_TO_INDEX))
-        self.closing_tonal_function[
-            TONAL_FUNCTIONS_TO_INDEX[self.phrase_object.phrase_tonal_progression[CLOSING][0]]
-        ] = 1
-
-        self.opening_tonality = torch.zeros(SCALE_DEGREES)
-        self.opening_tonality[self.phrase_object.phrase_tonal_progression[OPENING][1] - 1] = 1
-
-        self.closing_tonality = torch.zeros(SCALE_DEGREES)
-        self.closing_tonality[self.phrase_object.phrase_tonal_progression[CLOSING][1] - 1] = 1
+        self.length_in_quarters[int(self.phrase_object.phrase_length)] = 1
 
         # We want four core harmonies for each phrase - pickup (if exists), opening downbeat, pre-fermata harmony,
         # and fermata harmony. In addition, we will have the soprano degree. Note that the harmony is represented by
         # the degree in relation to the *local* tonality, and the soprano degree is in relation to the
 
+        # UPDATE: Now we attempt at disregarding the local harmony, and just look at the degrees of the
+        # harmonies in relation to the main key of the chorale
+
         # Pickup harmony
         self.opening_pickup_harmony = degree_to_one_hot(
-            self.phrase_object.opening_harmony_group.harmony_list[0].relation_to_local_key
+            self.phrase_object.opening_harmony_group[0].relation_to_chorale_key
         ) if self.phrase_object.pickup else torch.zeros(SCALE_DEGREES)
 
         self.opening_pickup_harmony_soprano = degree_to_one_hot(
-            self.phrase_object.opening_harmony_group.harmony_list[0].soprano_degree
+            self.phrase_object.opening_harmony_group[0].soprano_degree
         ) if self.phrase_object.pickup else torch.zeros(SCALE_DEGREES)
 
         self.opening_pickup_harmony_inversion = inversion_to_one_hot(
-            self.phrase_object.opening_harmony_group.harmony_list[0].inversion
+            self.phrase_object.opening_harmony_group[0].inversion
         ) if self.phrase_object.pickup else torch.zeros(NUMBER_OF_INVERSIONS)
 
         # Downbeat harmony
         self.opening_downbeat_harmony = degree_to_one_hot(
-            self.phrase_object.opening_harmony_group.harmony_list[-1].relation_to_local_key
+            self.phrase_object.opening_harmony_group[-1].relation_to_chorale_key
         )
 
         self.opening_downbeat_harmony_soprano = degree_to_one_hot(
-            self.phrase_object.opening_harmony_group.harmony_list[-1].soprano_degree
+            self.phrase_object.opening_harmony_group[-1].soprano_degree
         )
 
         self.opening_downbeat_harmony_inversion = inversion_to_one_hot(
-            self.phrase_object.opening_harmony_group.harmony_list[-1].inversion
+            self.phrase_object.opening_harmony_group[-1].inversion
         )
 
         # Pre-fermata harmony
         self.pre_fermata_harmony = degree_to_one_hot(
-            self.phrase_object.closing_harmony_group.harmony_list[-2].relation_to_local_key
+            self.phrase_object.closing_harmony_group[-2].relation_to_chorale_key
         )
 
         self.pre_fermata_harmony_soprano = degree_to_one_hot(
-            self.phrase_object.closing_harmony_group.harmony_list[-2].soprano_degree
+            self.phrase_object.closing_harmony_group[-2].soprano_degree
         )
 
         self.pre_fermata_harmony_inversion = inversion_to_one_hot(
-            self.phrase_object.closing_harmony_group.harmony_list[-2].inversion
+            self.phrase_object.closing_harmony_group[-2].inversion
         )
 
         # Fermata harmony
         self.fermata_harmony = degree_to_one_hot(
-            self.phrase_object.closing_harmony_group.harmony_list[-1].relation_to_local_key
+            self.phrase_object.closing_harmony_group[-1].relation_to_chorale_key
         )
 
         self.fermata_harmony_soprano = degree_to_one_hot(
-            self.phrase_object.closing_harmony_group.harmony_list[-1].soprano_degree
+            self.phrase_object.closing_harmony_group[-1].soprano_degree
         )
 
         self.fermata_harmony_inversion = inversion_to_one_hot(
-            self.phrase_object.closing_harmony_group.harmony_list[-1].inversion
+            self.phrase_object.closing_harmony_group[-1].inversion
         )
 
     def __call__(self):
@@ -271,12 +250,8 @@ class GeneratedPhraseBatchTensor:
 
         # Initialize all the potential features of the phrase
         self.index_in_chorale = None
-        self.mode = None
+        self.phrase_mode = None
         self.length_in_quarters = None
-        self.opening_tonal_function = None
-        self.opening_tonality = None
-        self.closing_tonal_function = None
-        self.closing_tonality = None
         self.opening_pickup_harmony = None
         self.opening_pickup_harmony_soprano = None
         self.opening_pickup_harmony_inversion = None
@@ -306,8 +281,8 @@ class GeneratedPhraseBatchTensor:
 
         for i in display_index_range:
             mode = ''
-            if self.mode is not None:
-                mode = INT_TO_MODE[self.mode[i]]
+            if self.phrase_mode is not None:
+                mode = INT_TO_MODE[self.phrase_mode[i].item()]
 
             if not key_string:
                 if mode == 'MAJOR' or mode == '':
@@ -326,38 +301,11 @@ class GeneratedPhraseBatchTensor:
                 # Note that this is calculated according to the index, thus we need to add one to get the actual length
                 print(f"Length in quarters = {self.length_in_quarters[i] + 1}")
 
-            if self.opening_tonal_function is not None:
-                print(f"Opening tonal function = {INDEX_TO_TONAL_FUNCTIONS[self.opening_tonal_function[i].item()]}")
-
-            if self.opening_tonality is not None:
-                print("Opening tonality = {0}".format(
-                    INT_TO_KEY[
-                        degree_from_series_of_relative_degrees([
-                            key,
-                            self.opening_tonality[i].item(),
-                        ])
-                    ]
-                ))
-
-            if self.closing_tonal_function is not None:
-                print(f"Closing tonal function = {INDEX_TO_TONAL_FUNCTIONS[self.closing_tonal_function[i].item()]}")
-
-            if self.closing_tonality is not None:
-                print("Closing tonality = {0}".format(
-                    INT_TO_KEY[
-                        degree_from_series_of_relative_degrees([
-                            key,
-                            self.closing_tonality[i].item(),
-                        ])
-                    ]
-                ))
-
             if self.opening_pickup_harmony is not None:
                 print("Opening pickup harmony = {0}".format(
                     INT_TO_KEY[
                         degree_from_series_of_relative_degrees([
                             key,
-                            self.opening_tonality[i].item(),
                             self.opening_pickup_harmony[i].item()
                         ])
                     ]
@@ -368,7 +316,6 @@ class GeneratedPhraseBatchTensor:
                     INT_TO_KEY[
                         degree_from_series_of_relative_degrees([
                             key,
-                            self.opening_tonality[i].item(),
                             self.opening_pickup_harmony[i].item(),
                             self.opening_pickup_harmony_soprano[i].item()
                         ])
@@ -385,7 +332,6 @@ class GeneratedPhraseBatchTensor:
                     INT_TO_KEY[
                         degree_from_series_of_relative_degrees([
                             key,
-                            self.opening_tonality[i].item(),
                             self.opening_downbeat_harmony[i].item()
                         ])
                     ]
@@ -396,7 +342,6 @@ class GeneratedPhraseBatchTensor:
                     INT_TO_KEY[
                         degree_from_series_of_relative_degrees([
                             key,
-                            self.opening_tonality[i].item(),
                             self.opening_downbeat_harmony[i].item(),
                             self.opening_downbeat_harmony_soprano[i].item()
                         ])
@@ -413,7 +358,6 @@ class GeneratedPhraseBatchTensor:
                     INT_TO_KEY[
                         degree_from_series_of_relative_degrees([
                             key,
-                            self.closing_tonality[i].item(),
                             self.pre_fermata_harmony[i].item()
                         ])
                     ]
@@ -424,7 +368,6 @@ class GeneratedPhraseBatchTensor:
                     INT_TO_KEY[
                         degree_from_series_of_relative_degrees([
                             key,
-                            self.closing_tonality[i].item(),
                             self.pre_fermata_harmony[i].item(),
                             self.pre_fermata_harmony_soprano[i].item()
                         ])
@@ -441,7 +384,6 @@ class GeneratedPhraseBatchTensor:
                     INT_TO_KEY[
                         degree_from_series_of_relative_degrees([
                             key,
-                            self.closing_tonality[i].item(),
                             self.fermata_harmony[i].item()
                         ])
                     ]
@@ -452,7 +394,6 @@ class GeneratedPhraseBatchTensor:
                     INT_TO_KEY[
                         degree_from_series_of_relative_degrees([
                             key,
-                            self.closing_tonality[i].item(),
                             self.fermata_harmony[i].item(),
                             self.fermata_harmony_soprano[i].item()
                         ])

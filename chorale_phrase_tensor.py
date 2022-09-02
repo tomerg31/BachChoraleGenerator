@@ -2,29 +2,27 @@ import torch
 from abstract_chorale_objects import PhraseObject
 from chorale_feature_extractor import ExtractedPhrase
 
-MAX_CHORALE_LENGTH = 24
-MAX_PHRASE_LENGTH_IN_QUARTERS = 24
-NUMBER_OF_MODES = 2
-TONAL_FUNCTIONS_TO_INDEX = {
-    'TONIC': 0,
-    'SUBDOMINANT': 1,
-    'DOMINANT': 2
-}
-INDEX_TO_TONAL_FUNCTIONS = {
-    0: 'TONIC',
-    1: 'SUBDOMINANT',
-    2: 'DOMINANT'
-}
-TONAL_FUNCTION_TO_DEGREE = {
-    'TONIC': 0,
-    'SUBDOMINANT': 3,
-    'DOMINANT': 4
-}
-DEGREE_TO_TONAL_FUNCTION = {
-    0: 'TONIC',
-    3: 'SUBDOMINANT',
-    4: 'DOMINANT'
-}
+# These babies are out of commission at this point. Maybe we'll find a use for them in the future
+# TONAL_FUNCTIONS_TO_INDEX = {
+#     'TONIC': 0,
+#     'SUBDOMINANT': 1,
+#     'DOMINANT': 2
+# }
+# INDEX_TO_TONAL_FUNCTIONS = {
+#     0: 'TONIC',
+#     1: 'SUBDOMINANT',
+#     2: 'DOMINANT'
+# }
+# TONAL_FUNCTION_TO_DEGREE = {
+#     'TONIC': 0,
+#     'SUBDOMINANT': 3,
+#     'DOMINANT': 4
+# }
+# DEGREE_TO_TONAL_FUNCTION = {
+#     0: 'TONIC',
+#     3: 'SUBDOMINANT',
+#     4: 'DOMINANT'
+# }
 
 OPENING = 0
 CLOSING = 1
@@ -56,7 +54,7 @@ INT_TO_MODE = {
 NUMBER_OF_INVERSIONS = 4
 
 FEATURES_ONE_HOT_LENGTH = {
-    'index_in_chorale': 10,
+    'index_in_chorale': 24,
     'phrase_mode': 2,
     'length_in_quarters': 24,
     'opening_pickup_harmony': 7,
@@ -77,20 +75,20 @@ FEATURES_ONE_HOT_LENGTH = {
 # If you wish to add another feature, make sure it is supported in all the structures in this file.
 PHRASE_FEATURE_LIST = [
     # 'index_in_chorale'
-    # 'phrase_mode',
+    'phrase_mode',
     # 'length_in_quarters',
     'opening_pickup_harmony',
     # 'opening_pickup_harmony_soprano',
-    # 'opening_pickup_harmony_inversion',
+    'opening_pickup_harmony_inversion',
     'opening_downbeat_harmony',
     # 'opening_downbeat_harmony_soprano',
-    # 'opening_downbeat_harmony_inversion',
+    'opening_downbeat_harmony_inversion',
     'pre_fermata_harmony',
     # 'pre_fermata_harmony_soprano',
-    # 'pre_fermata_harmony_inversion',
+    'pre_fermata_harmony_inversion',
     'fermata_harmony',
     # 'fermata_harmony_soprano',
-    # 'fermata_harmony_inversion'
+    'fermata_harmony_inversion'
 ]
 
 
@@ -140,19 +138,20 @@ class PhraseTensor:
         self.phrase_object = phrase_object
         self.valid = True
 
-        # The index of the phrase in the whole chorale
-        self.index_in_chorale = torch.zeros(MAX_CHORALE_LENGTH)
+        # The index of the phrase in the whole chorale. This will probably not be a feature that we will learn to
+        # generate in by the decoder. The index will be inferred at a later stage by the RNN using the encodings.
+        self.index_in_chorale = torch.zeros(FEATURES_ONE_HOT_LENGTH['index_in_chorale'])
         self.index_in_chorale[self.phrase_object.index_in_chorale] = 1
 
-        self.phrase_mode = torch.zeros(NUMBER_OF_MODES)
+        self.phrase_mode = torch.zeros(FEATURES_ONE_HOT_LENGTH['phrase_mode'])
         mode_index = 0 if self.phrase_object.chorale_mode != 'minor' else 1
         self.phrase_mode[mode_index] = 1
 
         # The total length of the phrase in quarters
-        self.length_in_quarters = torch.zeros(MAX_PHRASE_LENGTH_IN_QUARTERS)
+        self.length_in_quarters = torch.zeros(FEATURES_ONE_HOT_LENGTH['length_in_quarters'])
 
-        # Too long phrases are outliers and should probably not be dealt with.
-        if self.phrase_object.phrase_length >= MAX_PHRASE_LENGTH_IN_QUARTERS:
+        # Too long phrases are outliers and should probably be ignored at this point.
+        if self.phrase_object.phrase_length >= FEATURES_ONE_HOT_LENGTH['length_in_quarters']:
             print(f"Phrase is longer than maximum allotted. Chorale "
                   f"{self.phrase_object.chorale_name} "
                   f"phrase index {self.phrase_object.index_in_chorale}")
@@ -269,8 +268,9 @@ class GeneratedPhraseBatchTensor:
         for i, feature in enumerate(PHRASE_FEATURE_LIST):
             exec(f'self.{feature} = scores_to_index(self.phrase_feature_list[i])')
 
-    def display_phrase_information_in_a_given_key(self, key_string=None, display_index_range=None):
-        assert (key_string in KEY_TO_INT.keys()) or (key_string is None), "Key must be an uppercase letter [A-G]"
+    def display_phrase_information_in_a_given_key(self, input_key_string=None, display_index_range=None):
+        assert (input_key_string in KEY_TO_INT.keys()) or (input_key_string is None), \
+            "Key must be an uppercase letter [A-G]"
 
         if not display_index_range:
             # Display all phrases in tensor
@@ -284,7 +284,9 @@ class GeneratedPhraseBatchTensor:
             if self.phrase_mode is not None:
                 mode = INT_TO_MODE[self.phrase_mode[i].item()]
 
-            if not key_string:
+            if input_key_string:
+                key_string = input_key_string
+            else:
                 if mode == 'MAJOR' or mode == '':
                     key_string = 'C'
                 else:

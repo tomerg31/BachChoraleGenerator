@@ -82,7 +82,7 @@ class ExtractedChorale:
                     self.mode,
                     [measure_offset for measure_offset in self.measure_offsets if
                      start_offset <= measure_offset <= end_offset],
-                    i == len(self.fermata_global_offsets)
+                    len(self.fermata_global_offsets)
                 )
             )
 
@@ -167,7 +167,7 @@ class ExtractedPhrase:
             chorale_key,
             chorale_mode,
             measure_offsets,
-            final_phrase_in_chorale
+            number_of_phrases_in_chorale
     ):
         self.chorale_name = chorale_name
 
@@ -183,7 +183,9 @@ class ExtractedPhrase:
 
         self.measure_offsets = measure_offsets
 
-        self.final_phrase_in_chorale = final_phrase_in_chorale
+        self.number_of_phrases_in_chorale = number_of_phrases_in_chorale
+
+        self.final_phrase_in_chorale = self.index_in_chorale == self.number_of_phrases_in_chorale - 1
 
         self.pickup = start_offset not in self.measure_offsets
 

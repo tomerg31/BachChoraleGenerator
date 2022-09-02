@@ -113,40 +113,27 @@ class Trainer(abc.ABC):
                 verbose = True
             self._print(f"--- EPOCH {epoch+1}/{num_epochs} ---", verbose)
 
-            # TODO: Train & evaluate for one epoch
-            #  - Use the train/test_epoch methods.
-            #  - Save losses and accuracies in the lists above.
-            # ====== YOUR CODE: ======
             train_result = self.train_epoch(dl_train, **kw)
             train_loss.append(sum(train_result.losses) / len(train_result.losses))
             train_acc.append(train_result.accuracy)
             test_result = self.test_epoch(dl_test, **kw)
             test_loss.append(sum(test_result.losses) / len(test_result.losses))
             test_acc.append(test_result.accuracy)
-            # ========================
 
-            # TODO:
-            #  - Optional: Implement early stopping. This is a very useful and
-            #    simple regularization technique that is highly recommended.
-            #  - Optional: Implement checkpoints. You can use the save_checkpoint
-            #    method on this class to save the model to the file specified by
-            #    the checkpoints argument.
             if best_acc is None or test_result.accuracy > best_acc:
-                # ====== YOUR CODE: ======
                 best_acc = test_result.accuracy
                 epochs_without_improvement = 1
                 if checkpoints:
                     self.save_checkpoint(checkpoints + ".pt")
-                # ========================
             else:
-                # ====== YOUR CODE: ======
                 epochs_without_improvement += 1
                 if early_stopping and epochs_without_improvement >= early_stopping:
                     break
-                # ========================
 
             if post_epoch_fn:
                 post_epoch_fn(epoch, train_result, test_result, verbose)
+
+            print(self.model.initial_hidden_state)
 
         return FitResult(actual_num_epochs, train_loss, train_acc, test_loss, test_acc)
 
@@ -304,11 +291,55 @@ class VAETrainer(Trainer):
         x = x.to(self.device)  # Image batch (N,C,H,W)
 
         with torch.no_grad():
-            # TODO: Evaluate a VAE on one batch.
-            # ====== YOUR CODE: ======
             xr, mu, log_sigma2 = self.model(x)
             loss, data_loss, _ = self.loss_fn(x, xr, mu, log_sigma2)
-            # ========================
 
         return BatchResult(loss.item(), 1 / data_loss.item())
+
+
+class RNNTrainer(Trainer):
+    def __init__(self, model, loss_fn, optimizer, device=None):
+        super().__init__(model, device)
+        self.loss_fn = loss_fn
+        self.optimizer = optimizer
+        self.model = model
+        self.hidden_state = None
+
+    def train_epoch(self, dl_train: DataLoader, **kw):
+        self.hidden_state = None
+        return super().train_epoch(dl_train, **kw)
+
+    def test_epoch(self, dl_test: DataLoader, **kw):
+        self.hidden_state = None
+        return super().test_epoch(dl_test, **kw)
+
+    def train_batch(self, batch) -> BatchResult:
+        x, y = batch
+        x = x.to(self.device, dtype=torch.float)  # (B,S,V)
+        y = y.to(self.device, dtype=torch.long)  # (B,S)
+        seq_len = y.shape[1]
+
+        self.optimizer.zero_grad()
+        y_hat, self.hidden_state = self.model(x, None)  # self.hidden_state)  # How to properly initialize hidden state?
+        loss = self.loss_fn(torch.transpose(y_hat, dim0=1, dim1=2), y)
+        loss.backward()
+        self.hidden_state.detach_()
+        self.optimizer.step()
+        num_correct = torch.sum(torch.argmax(y_hat, dim=2) == y)
+
+        return BatchResult(loss.item(), num_correct.item() / seq_len)
+
+    def test_batch(self, batch) -> BatchResult:
+        x, y = batch
+        x = x.to(self.device, dtype=torch.float)  # (B,S,V)
+        y = y.to(self.device, dtype=torch.long)  # (B,S)
+        seq_len = y.shape[1]
+
+        with torch.no_grad():
+            y_hat, self.hidden_state = self.model(x, None)  # self.hidden_state)
+            self.optimizer.zero_grad()
+            loss = self.loss_fn(torch.transpose(y_hat, dim0=1, dim1=2), y)
+            num_correct = torch.sum(torch.argmax(y_hat, dim=2) == y)
+
+        return BatchResult(loss.item(), num_correct.item() / seq_len)
 

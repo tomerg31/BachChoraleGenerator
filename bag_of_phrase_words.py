@@ -150,6 +150,8 @@ class ChoraleSentences:
 
         self.chorale_sentence_tensor = torch.concat(tensor_list, dim=0)
 
+        # This list holds all the chorale sentences in their unpadded form - chorale sentences are vectors of unique
+        # sizes
         self.chorale_sentence_list_of_tensors = [
             torch.tensor(chorale, dtype=torch.long) for chorale in self.chorale_sentence_dict.values()
         ]

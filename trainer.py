@@ -133,8 +133,6 @@ class Trainer(abc.ABC):
             if post_epoch_fn:
                 post_epoch_fn(epoch, train_result, test_result, verbose)
 
-            print(self.model.initial_hidden_state)
-
         return FitResult(actual_num_epochs, train_loss, train_acc, test_loss, test_acc)
 
     def save_checkpoint(self, checkpoint_filename: str):
@@ -323,7 +321,7 @@ class RNNTrainer(Trainer):
         y_hat, self.hidden_state = self.model(x, None)  # self.hidden_state)  # How to properly initialize hidden state?
         loss = self.loss_fn(torch.transpose(y_hat, dim0=1, dim1=2), y)
         loss.backward()
-        self.hidden_state.detach_()
+#        self.hidden_state.detach_()
         self.optimizer.step()
         num_correct = torch.sum(torch.argmax(y_hat, dim=2) == y)
 
@@ -337,7 +335,6 @@ class RNNTrainer(Trainer):
 
         with torch.no_grad():
             y_hat, self.hidden_state = self.model(x, None)  # self.hidden_state)
-            self.optimizer.zero_grad()
             loss = self.loss_fn(torch.transpose(y_hat, dim0=1, dim1=2), y)
             num_correct = torch.sum(torch.argmax(y_hat, dim=2) == y)
 

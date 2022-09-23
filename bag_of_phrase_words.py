@@ -56,6 +56,8 @@ class BagOfPhrases:
 
         self._add_start_end_and_joker_token()
 
+        self._make_features_by_index_dict(feature_list)
+
     def _add_start_end_and_joker_token(self):
         # Since part of the preprocessing is removing some too-long phrases, we'll have a joker token to fill in the
         # blanks
@@ -67,10 +69,24 @@ class BagOfPhrases:
         self.start_token_index = self.next_available_index
         self.next_available_index += 1
 
-        # The end token will also represent the largest index number in the bag
         self.index_to_phrase_items_map[self.next_available_index] = 'end_token'
         self.end_token_index = self.next_available_index
         self.next_available_index += 1
+
+        self.index_to_phrase_items_map[self.next_available_index] = 'pad_token'
+        self.pad_token_index = self.next_available_index
+        self.next_available_index += 1
+
+    def _make_features_by_index_dict(self, feature_list):
+        self.features_by_index = {}
+
+        for index in range(self.joker_token_index):
+            phrase = self.index_to_phrase_items_map[index][0]
+            phrase_features = {}
+            for feature in feature_list:
+                exec(f"phrase_features[feature] = torch.argmax(phrase.{feature})")
+
+            self.features_by_index[index] = phrase_features
 
 
 class PhraseItemInBag(PhraseTensor):
@@ -98,6 +114,10 @@ class ChoraleSentences:
 
         self.start_token_index = bag_of_phrases.start_token_index
         self.end_token_index = bag_of_phrases.end_token_index
+        self.joker_token_index = bag_of_phrases.joker_token_index
+        self.pad_token_index = bag_of_phrases.pad_token_index
+
+        self.features_by_index = bag_of_phrases.features_by_index
 
         # Go over the bag of words and build the chorale sentence dictionary
         for index in bag_of_phrases.index_to_phrase_items_map.keys():
@@ -142,7 +162,7 @@ class ChoraleSentences:
                     torch.tensor(chorale, dtype=torch.long),
                     (0, self.max_chorale_length - len(chorale)),
                     'constant',
-                    chorale[-1]
+                    self.pad_token_index
                 ),
                 dim=0
             ) for chorale in self.chorale_sentence_dict.values()
@@ -156,6 +176,8 @@ class ChoraleSentences:
             torch.tensor(chorale, dtype=torch.long) for chorale in self.chorale_sentence_dict.values()
         ]
 
+        self.starting_phrases = self._get_starting_phrases_dict()
+
     def phrase_index_to_onehot(self, phrase_indices):
         if isinstance(phrase_indices, int):
             phrase_indices = [phrase_indices]
@@ -165,4 +187,36 @@ class ChoraleSentences:
 
         return result
 
+    def print_chorale_sentence_features(self, chorale_sentence: list):
+        print(f'Printing features for phrase {chorale_sentence}')
+        for phrase in chorale_sentence:
+            if phrase > self.joker_token_index:
+                continue
+            print(phrase, end='')
+            if phrase == self.joker_token_index:
+                print('joker fill')
+                continue
+            for feature in self.features_by_index[phrase].keys():
+                print(f'\t{feature}: {self.features_by_index[phrase][feature]}')
+
+    def get_starting_phrase(self, equal_probability=False):
+        # This is a terrible, wasteful, stupid way of doing this but whatever
+        starting_phrase_list = []
+        for phrase in self.starting_phrases.keys():
+            multiplier = 1 if equal_probability else self.starting_phrases[phrase]
+            starting_phrase_list += [phrase] * multiplier
+
+        return starting_phrase_list[torch.randint(len(starting_phrase_list), (1,)).item()]
+
+    def _get_starting_phrases_dict(self):
+        # This method will return a dict where the keys are indices of possible starting phrases and the values are
+        # their appearance count as starting phrases
+        starting_phrases_dict = {}
+        for chorale in self.chorale_sentence_dict.values():
+            if int(chorale[1].item()) in starting_phrases_dict.keys():
+                starting_phrases_dict[int(chorale[1].item())] += 1
+            else:
+                starting_phrases_dict[int(chorale[1].item())] = 1
+
+        return starting_phrases_dict
 

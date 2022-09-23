@@ -4,17 +4,6 @@ from bag_of_phrase_words import BagOfPhrases, ChoraleSentences
 import os
 
 
-def chorale_sentences_to_labelled_samples(chorale_sentences, device):
-    # If train with batches is true, we return a tensor, if not we return lists of tensors
-
-    embedded_chorale_sentences = torch.nn.functional.one_hot(chorale_sentences.chorale_sentence_tensor).to(device)
-
-    samples = embedded_chorale_sentences[:, :-1, :]
-    labels = chorale_sentences.chorale_sentence_tensor[:, 1:].to(device)
-
-    return samples, labels
-
-
 def hot_softmax(y, dim=0, temperature=1.0):
     normalized_y = y - torch.max(y, dim=dim).values
     hot_y = torch.pow(torch.e, torch.div(normalized_y, temperature))
@@ -23,10 +12,14 @@ def hot_softmax(y, dim=0, temperature=1.0):
     return result
 
 
-def generate_from_model(model, chorale_sentences: ChoraleSentences, T):
+def generate_from_model(model, chorale_sentences: ChoraleSentences, T, pick_first_phrase=False):
     device = next(model.parameters()).device
 
-    new_input_index = chorale_sentences.start_token_index
+    if pick_first_phrase:
+        new_input_index = chorale_sentences.get_starting_phrase()
+    else:
+        new_input_index = chorale_sentences.start_token_index
+
     generated_chorale_sentence = [new_input_index]
     model_input = torch.unsqueeze(
         chorale_sentences.phrase_index_to_onehot(generated_chorale_sentence).to(device).float(),
@@ -35,7 +28,8 @@ def generate_from_model(model, chorale_sentences: ChoraleSentences, T):
 
     with torch.no_grad():
         hidden_state = None
-        while new_input_index != chorale_sentences.end_token_index:
+        counter = 0
+        while new_input_index != chorale_sentences.end_token_index and counter < 25:
             model_output, hidden_state = model(model_input, hidden_state)
             last_char_distribution = hot_softmax(model_output.squeeze(), dim=0, temperature=T)
             new_input_index = torch.multinomial(last_char_distribution, 1).item()
@@ -44,6 +38,7 @@ def generate_from_model(model, chorale_sentences: ChoraleSentences, T):
                 chorale_sentences.phrase_index_to_onehot(new_input_index).to(device).float(),
                 dim=0
             )
+            counter += 1
 
     return generated_chorale_sentence
 

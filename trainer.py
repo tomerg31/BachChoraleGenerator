@@ -295,7 +295,7 @@ class VAETrainer(Trainer):
         return BatchResult(loss.item(), 1 / data_loss.item())
 
 
-class RNNTrainer(Trainer):
+class ChoraleSentenceTrainer(Trainer):
     def __init__(self, model, loss_fn, optimizer, device=None):
         super().__init__(model, device)
         self.loss_fn = loss_fn
@@ -312,7 +312,7 @@ class RNNTrainer(Trainer):
         return super().test_epoch(dl_test, **kw)
 
     def train_batch(self, batch) -> BatchResult:
-        x, y = batch
+        x, _, y = batch
         x = x.to(self.device, dtype=torch.float)  # (B,S,V)
         y = y.to(self.device, dtype=torch.long)  # (B,S)
         seq_len = y.shape[1]
@@ -321,14 +321,14 @@ class RNNTrainer(Trainer):
         y_hat, self.hidden_state = self.model(x, None)  # self.hidden_state)  # How to properly initialize hidden state?
         loss = self.loss_fn(torch.transpose(y_hat, dim0=1, dim1=2), y)
         loss.backward()
-#        self.hidden_state.detach_()
+        self.hidden_state.detach_()
         self.optimizer.step()
         num_correct = torch.sum(torch.argmax(y_hat, dim=2) == y)
 
         return BatchResult(loss.item(), num_correct.item() / seq_len)
 
     def test_batch(self, batch) -> BatchResult:
-        x, y = batch
+        x, _, y = batch
         x = x.to(self.device, dtype=torch.float)  # (B,S,V)
         y = y.to(self.device, dtype=torch.long)  # (B,S)
         seq_len = y.shape[1]
@@ -339,4 +339,41 @@ class RNNTrainer(Trainer):
             num_correct = torch.sum(torch.argmax(y_hat, dim=2) == y)
 
         return BatchResult(loss.item(), num_correct.item() / seq_len)
+
+
+class ChoraleSentenceTrainerWithFirstPhrase(Trainer):
+    def __init__(self, model, loss_fn, optimizer, device=None):
+        super().__init__(model, device)
+        self.loss_fn = loss_fn
+        self.optimizer = optimizer
+        self.model = model
+
+    def train_batch(self, batch) -> BatchResult:
+        x, _, y = batch
+        x = x[:, 1:, :].to(self.device, dtype=torch.float)
+        y = y[:, 1:].to(self.device, dtype=torch.long)
+        seq_len = y.shape[1]
+
+        self.optimizer.zero_grad()
+        y_hat, _ = self.model(x, None)
+        loss = self.loss_fn(torch.transpose(y_hat, dim0=1, dim1=2), y)
+        loss.backward()
+        self.optimizer.step()
+        num_correct = torch.sum(torch.argmax(y_hat, dim=2) == y)
+
+        return BatchResult(loss.item(), num_correct.item() / seq_len)
+
+    def test_batch(self, batch) -> BatchResult:
+        x, _, y = batch
+        x = x[:, 1:, :].to(self.device, dtype=torch.float)
+        y = y[:, 1:].to(self.device, dtype=torch.long)
+        seq_len = y.shape[1]
+
+        with torch.no_grad():
+            y_hat, _ = self.model(x, None)  # self.hidden_state)
+            loss = self.loss_fn(torch.transpose(y_hat, dim0=1, dim1=2), y)
+            num_correct = torch.sum(torch.argmax(y_hat, dim=2) == y)
+
+        return BatchResult(loss.item(), num_correct.item() / seq_len)
+
 

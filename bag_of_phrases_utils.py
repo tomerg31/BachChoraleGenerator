@@ -2,6 +2,7 @@ from copy import deepcopy
 import os
 import pickle
 from bag_of_phrase_words import ChoraleSentences, BagOfPhrases
+import torch
 
 
 def make_feature_combinations():
@@ -14,26 +15,26 @@ def make_feature_combinations():
 
     basic_two_harmonies = [
         'opening_downbeat_harmony',
-        'fermata_harmony_inversion'
+        'fermata_harmony'
     ]
 
     basic_three_harmonies_opening = [
         'opening_pickup_harmony',
         'opening_downbeat_harmony',
-        'fermata_harmony_inversion',
+        'fermata_harmony',
     ]
 
     basic_three_harmonies_closing = [
         'opening_downbeat_harmony',
         'pre_fermata_harmony',
-        'fermata_harmony_inversion'
+        'fermata_harmony'
     ]
 
     basic_all_harmonies = [
         'opening_pickup_harmony',
         'opening_downbeat_harmony',
         'pre_fermata_harmony',
-        'fermata_harmony_inversion'
+        'fermata_harmony'
     ]
 
     feature_combinations['basic_two_harmonies'] = basic_two_harmonies
@@ -102,4 +103,53 @@ def make_chorale_sentences_by_feature_combination(
     with open('chorale_sentences_by_feature_combination.pkl', 'wb') as chorale_sentences_by_feature_combination_pkl:
         pickle.dump(chorale_sentences_by_feature_combination, chorale_sentences_by_feature_combination_pkl)
 
+
+def chorale_sentences_tensor_to_labelled_samples(chorale_sentences, device):
+    # If train with batches is true, we return a tensor, if not we return lists of tensors
+
+    embedded_chorale_sentences = torch.nn.functional.one_hot(chorale_sentences.chorale_sentence_tensor).to(device)
+
+    samples = embedded_chorale_sentences[:, :-1, :]
+    labels = chorale_sentences.chorale_sentence_tensor[:, 1:].to(device)
+
+    return samples, labels
+
+
+def chorale_sentences_list_to_labelled_samples(chorale_sentences: ChoraleSentences):
+    samples, labels = [], []
+    for chorale_sentence in chorale_sentences.chorale_sentence_list_of_tensors:
+        samples.append(chorale_sentence[:-1])
+        labels.append(chorale_sentence[1:])
+
+    return samples, labels
+
+
+class PhraseCollator(object):
+    def __init__(self, chorale_sentences: ChoraleSentences, device):
+        self.chorale_sentences = chorale_sentences
+        self.device = device
+
+    def __call__(self, batch):
+        samples, lengths, labels = [], [], []
+
+        for (sample, label) in batch:
+            samples.append(torch.tensor(sample))
+            lengths.append(len(sample))
+            labels.append(torch.tensor(label))
+
+        samples = torch.nn.utils.rnn.pad_sequence(
+            samples,
+            batch_first=True,
+            padding_value=self.chorale_sentences.pad_token_index
+        )
+
+        samples = torch.nn.functional.one_hot(samples, num_classes=self.chorale_sentences.vocabulary_length)
+
+        labels = torch.nn.utils.rnn.pad_sequence(
+            labels,
+            batch_first=True,
+            padding_value=self.chorale_sentences.pad_token_index
+        )
+
+        return samples.to(self.device), lengths, labels.to(self.device)
 

@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from ChoralePhraseTensor import GeneratedPhraseBatchTensor, PhraseTensor, cut_tensor_by_features
+from chorale_phrase_tensor import GeneratedPhraseBatchTensor, PhraseTensor, cut_tensor_by_features
 
 
 class PhraseEncoder(nn.Module):
@@ -125,8 +125,8 @@ class VAE(nn.Module):
 def vae_loss(x, xr, z_mu, z_log_sigma2, x_sigma2):
     """
     Point-wise loss function of a VAE with latent space of dimension z_dim.
-    :param x: Input image batch of shape (N,C,H,W).
-    :param xr: Reconstructed (output) image batch.
+    :param x: Input phrase batch of shape (N,V).
+    :param xr: Reconstructed (output) phrase batch.
     :param z_mu: Posterior mean (batch) of shape (N, z_dim).
     :param z_log_sigma2: Posterior log-variance (batch) of shape (N, z_dim).
     :param x_sigma2: Likelihood variance (scalar).

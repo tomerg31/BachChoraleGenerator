@@ -9,6 +9,10 @@ ALTO = 1
 TENOR = 2
 BASS = 3
 
+EXACT = 0
+THIRD_UP = 1
+THIRD_DOWN = 2
+
 
 def get_offset_of_note_after_fermata(chorale: music21.stream.base.Score, fermata_offset):
     note_with_fermata = chorale.parts[SOPRANO].flat.notes.getElementsByOffset(fermata_offset)[0]
@@ -57,14 +61,20 @@ def get_tonal_function(baseline_harmony, harmony_root):
 
     if degree in [1, 3, 6]:
         tonal_function = 'TONIC'
+        if degree == 1:
+            relation_to_function = EXACT
+        else:
+            relation_to_function = THIRD_UP if degree == 3 else THIRD_DOWN
 
     elif degree in [2, 4]:
         tonal_function = 'SUBDOMINANT'
+        relation_to_function = EXACT if degree == 2 else THIRD_UP
 
     else:  # degree in [5, 7]
         tonal_function = 'DOMINANT'
+        relation_to_function = EXACT if degree == 5 else THIRD_UP
 
-    return tonal_function, degree
+    return tonal_function, relation_to_function
 
 
 def get_degree(base: music21.note.Note, note: music21.note.Note):
@@ -108,7 +118,7 @@ class ChoraleVector:
 
         # Since we are in Bach's music, a reliable assumption is that the last note of the bass voice would also
         # the key of the chorale
-        # TODO: Should we consider major vs minor?
+
         self.key = chorale.parts[BASS].flat.notes.last().name
 
         # A boolean that indicates whether the piece begins on a pickup.
